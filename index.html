@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- Supaya di iPhone bisa dibuka layar penuh lewat "Tambahkan ke Layar Utama" -->
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Pemilos">
+<title>E-Voting Ketua OSIS</title>
+<style>
+  body { font-family: system-ui, sans-serif; background: #f1f5f9; color: #0f172a; margin: 0; padding: 16px; }
+  main { max-width: 460px; margin: 24px auto; background: #fff; padding: 24px; border-radius: 12px; box-shadow: 0 1px 4px rgba(0,0,0,.12); }
+  h1 { font-size: 1.4rem; margin: 0 0 8px; }
+  label { display: block; font-weight: 600; margin-top: 16px; }
+  input[type=text], input[type=password] { width: 100%; box-sizing: border-box; padding: 12px; font-size: 1.1rem; border: 1px solid #94a3b8; border-radius: 8px; margin-top: 6px; }
+  fieldset { border: 0; padding: 0; margin: 16px 0 0; }
+  legend { font-weight: 600; padding: 0; }
+  .paslon { font-weight: 400; border: 1px solid #94a3b8; border-radius: 8px; padding: 14px; margin-top: 8px; cursor: pointer; }
+  .paslon:has(input:checked) { border-color: #1d4ed8; background: #eff6ff; font-weight: 600; }
+  button { width: 100%; margin-top: 20px; padding: 14px; font-size: 1.05rem; font-weight: 600; color: #fff; background: #1d4ed8; border: 0; border-radius: 8px; cursor: pointer; }
+  button:disabled { background: #94a3b8; }
+  #pesan { font-weight: 600; margin: 16px 0 0; }
+  .ok { color: #15803d; }
+  dialog { border: 0; border-radius: 12px; padding: 24px; width: 360px; max-width: calc(100% - 32px); box-sizing: border-box; box-shadow: 0 4px 24px rgba(0,0,0,.25); }
+  dialog p { margin: 0; font-size: 1.05rem; }
+  .sekunder { color: #0f172a; background: #e2e8f0; margin-top: 8px; }
+  #layarPenuh { width: auto; margin: 0 0 12px; padding: 8px 14px; font-size: .9rem; color: #0f172a; background: #e2e8f0; }
+  .gagal { color: #b91c1c; }
+</style>
+</head>
+<body>
+<main>
+  <button type="button" id="layarPenuh" hidden>Layar Penuh</button>
+  <h1 id="judul">Pemilihan Ketua OSIS</h1>
+  <p id="info">Memuat...</p>
+
+  <form id="gerbang" hidden>
+    <label for="pinMasuk">PIN</label>
+    <input type="password" id="pinMasuk" required maxlength="30" autocomplete="off">
+    <button>Masuk</button>
+  </form>
+
+  <form id="form" hidden>
+    <label for="kode" id="labelKode">NIS</label>
+    <input type="text" id="kode" required maxlength="30" autocomplete="off">
+    <div id="kotakToken" hidden>
+      <label for="token">Token</label>
+      <input type="text" id="token" maxlength="30" autocomplete="off">
+    </div>
+    <fieldset>
+      <legend>Pilih salah satu Calon Ketua OSIS</legend>
+      <div id="paslon"></div>
+    </fieldset>
+    <button id="tombol">Kirim Suara</button>
+  </form>
+
+  <p id="pesan" role="alert"></p>
+</main>
+
+<!-- Konfirmasi di dalam laman (bukan popup browser), supaya mode layar penuh tidak keluar -->
+<dialog id="konfirmasi">
+  <form method="dialog">
+    <p id="teksKonfirmasi"></p>
+    <button value="ya">Ya, kirim</button>
+    <button value="batal" class="sekunder">Batal</button>
+  </form>
+</dialog>
+
+<script>
+// ====== GANTI DENGAN URL WEB APP ANDA (Tahap 2), yang berakhiran /exec ======
+const API_URL = 'https://script.google.com/macros/s/AKfycbzlx4Y0IKHjMMsii3cXsRaiwyHGnTN1MKARalMGc3eAwMEmxa2YiH9CHfLNdWRSWMorow/exec';
+
+const $ = id => document.getElementById(id);
+function pesan(teks, ok) {
+  $('pesan').textContent = teks;
+  $('pesan').className = ok ? 'ok' : 'gagal';
+}
+
+// Tombol layar penuh. Disembunyikan di browser yang tidak mendukung (misalnya Safari di iPhone).
+if (document.fullscreenEnabled) {
+  $('layarPenuh').hidden = false;
+  $('layarPenuh').addEventListener('click', () =>
+    document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen());
+  document.addEventListener('fullscreenchange', () => {
+    $('layarPenuh').textContent = document.fullscreenElement ? 'Keluar Layar Penuh' : 'Layar Penuh';
+  });
+}
+
+// Menampilkan kotak konfirmasi; hasilnya true jika siswa menekan "Ya, kirim".
+function konfirmasi(teks) {
+  const kotak = $('konfirmasi');
+  $('teksKonfirmasi').textContent = teks;
+  kotak.returnValue = '';
+  kotak.showModal();
+  return new Promise(selesai => kotak.addEventListener('close', () => selesai(kotak.returnValue === 'ya'), { once: true }));
+}
+
+let pinMasuk = '';  // PIN masuk, hanya disimpan di memori tab ini
+let teksInfo = '';
+
+// Menampilkan gerbang PIN (true) atau formulir voting (false).
+function tampilGerbang(ya) {
+  $('gerbang').hidden = !ya;
+  $('form').hidden = ya;
+  $('info').textContent = ya ? 'Masukkan PIN untuk masuk.' : teksInfo;
+}
+
+// Saat laman dibuka: ambil judul, status voting, dan daftar paslon dari Apps Script (doGet).
+fetch(API_URL).then(r => r.json()).then(d => {
+  if (!d.ok) throw new Error(d.pesan);
+  $('judul').textContent = document.title = d.judul;
+  if (d.status !== 'BUKA') { $('info').textContent = 'Voting sedang ditutup.'; return; }
+
+  const label = d.mode === 'TOKEN' ? 'Token' : 'NIS';
+  $('labelKode').textContent = label;
+  $('kode').inputMode = d.mode === 'TOKEN' ? 'text' : 'numeric';
+  const duaKolom = d.mode === 'NIS+TOKEN'; // mode ini menampilkan kolom NIS dan kolom Token
+  $('kotakToken').hidden = !duaKolom;
+  $('token').required = duaKolom;
+  d.paslon.forEach(c => {
+    const kotak = document.createElement('label');
+    kotak.className = 'paslon';
+    const radio = Object.assign(document.createElement('input'), { type: 'radio', name: 'pilihan', value: c.no, required: true });
+    kotak.append(radio, ' ' + c.no + '. ' + c.nama); // textContent, bukan innerHTML: aman dari isi sheet yang aneh
+    $('paslon').append(kotak);
+  });
+  teksInfo = 'Masukkan ' + (duaKolom ? 'NIS dan Token' : label) + ' Anda, lalu pilih satu Calon Ketua OSIS.';
+  tampilGerbang(d.butuhPin);
+}).catch(() => { $('info').textContent = 'Gagal terhubung ke server. Muat ulang halaman.'; });
+
+// Gerbang PIN: PIN dikirim ke Apps Script dan diperiksa di sana.
+$('gerbang').addEventListener('submit', async e => {
+  e.preventDefault();
+  pesan('Memeriksa...', true);
+  try {
+    const pin = $('pinMasuk').value;
+    const r = await fetch(API_URL, { method: 'POST', body: JSON.stringify({ aksi: 'masuk', pinMasuk: pin }) });
+    const d = await r.json();
+    pesan(d.ok ? '' : d.pesan, d.ok);
+    if (d.ok) { pinMasuk = pin; $('pinMasuk').value = ''; tampilGerbang(false); }
+  } catch (err) {
+    pesan('Gagal terhubung ke server. Coba lagi.', false);
+  }
+});
+
+// Saat tombol ditekan: kirim NISN/token dan pilihan ke Apps Script (doPost).
+// Body dikirim sebagai teks biasa (tanpa header Content-Type) agar tidak diblokir CORS.
+$('form').addEventListener('submit', async e => {
+  e.preventDefault();
+  const dipilih = document.querySelector('input[name=pilihan]:checked');
+  if (!(await konfirmasi('Anda memilih ' + dipilih.parentNode.textContent.trim() + '. Pilihan tidak bisa diubah. Kirim?'))) return;
+
+  $('tombol').disabled = true;
+  pesan('Mengirim...', true);
+  try {
+    const r = await fetch(API_URL, {
+      method: 'POST',
+      body: JSON.stringify({ aksi: 'vote', pinMasuk: pinMasuk, kode: $('kode').value, token: $('token').value, pilihan: dipilih.value })
+    });
+    const d = await r.json();
+    pesan(d.ok ? 'Terima kasih, ' + d.nama + '. ' + d.pesan : d.pesan, d.ok);
+    if (d.mintaPin) tampilGerbang(true); // PIN diganti panitia di tengah jalan
+    if (d.ok) $('form').reset(); // siap untuk siswa berikutnya di perangkat yang sama
+  } catch (err) {
+    pesan('Koneksi terputus. Coba kirim lagi. Jika muncul "sudah digunakan", suara Anda sudah masuk.', false);
+  }
+  $('tombol').disabled = false;
+});
+</script>
+</body>
+</html>

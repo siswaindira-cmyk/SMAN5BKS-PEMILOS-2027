@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Hasil E-Voting</title>
+<style>
+  body { font-family: system-ui, sans-serif; background: #f1f5f9; color: #0f172a; margin: 0; padding: 16px; }
+  main { max-width: 640px; margin: 24px auto; background: #fff; padding: 24px; border-radius: 12px; box-shadow: 0 1px 4px rgba(0,0,0,.12); }
+  h1 { font-size: 1.4rem; margin: 0 0 8px; }
+  label { display: block; font-weight: 600; margin-top: 16px; }
+  input { width: 100%; box-sizing: border-box; padding: 12px; font-size: 1.1rem; border: 1px solid #94a3b8; border-radius: 8px; margin-top: 6px; }
+  button { margin-top: 16px; padding: 12px 20px; font-size: 1rem; font-weight: 600; color: #fff; background: #1d4ed8; border: 0; border-radius: 8px; cursor: pointer; }
+  #ringkasan { color: #475569; }
+  .baris { margin-top: 18px; }
+  .baris div:first-child { display: flex; justify-content: space-between; gap: 12px; font-weight: 600; }
+  .jalur { background: #e2e8f0; border-radius: 6px; height: 26px; margin-top: 6px; overflow: hidden; }
+  .isi { background: #1d4ed8; height: 100%; transition: width .4s; }
+  #pesan { font-weight: 600; color: #b91c1c; }
+</style>
+</head>
+<body>
+<main>
+  <h1 id="judul">Hasil E-Voting</h1>
+
+  <form id="masuk">
+    <label for="pin">PIN Panitia</label>
+    <input type="password" id="pin" required autocomplete="off">
+    <button>Lihat Hasil</button>
+  </form>
+
+  <section id="hasil" hidden>
+    <p id="ringkasan"></p>
+    <div id="grafik"></div>
+    <button id="segarkan" type="button">Muat ulang</button>
+  </section>
+
+  <p id="pesan" role="alert"></p>
+</main>
+
+<script>
+// ====== GANTI DENGAN URL WEB APP ANDA (sama dengan di index.html) ======
+const API_URL = 'https://script.google.com/macros/s/AKfycbzlx4Y0IKHjMMsii3cXsRaiwyHGnTN1MKARalMGc3eAwMEmxa2YiH9CHfLNdWRSWMorow/exec';
+
+const $ = id => document.getElementById(id);
+let pin = ''; // hanya disimpan di memori tab ini; hilang saat tab ditutup atau dimuat ulang
+
+// PIN dikirim ke Apps Script dan diperiksa di sana. Laman ini tidak tahu PIN yang benar,
+// dan angka suara baru dikirim server setelah PIN cocok.
+async function muat() {
+  try {
+    const r = await fetch(API_URL, { method: 'POST', body: JSON.stringify({ aksi: 'hasil', pin: pin }) });
+    const d = await r.json();
+    if (!d.ok) {
+      pin = '';
+      $('hasil').hidden = true;
+      $('masuk').hidden = false;
+      $('pesan').textContent = d.pesan;
+      return;
+    }
+    $('pesan').textContent = d.cocok ? '' : 'Peringatan: jumlah suara (' + d.totalSuara + ') tidak sama dengan jumlah pemilih berstatus SUDAH (' + d.sudahMemilih + '). Periksa spreadsheet.';
+    $('judul').textContent = 'Hasil ' + d.judul;
+    const partisipasi = d.totalPemilih ? (d.sudahMemilih / d.totalPemilih * 100).toFixed(1) : '0.0';
+    $('ringkasan').textContent = 'Voting ' + d.status + ' · ' + d.sudahMemilih + ' dari ' + d.totalPemilih +
+      ' pemilih sudah memilih (' + partisipasi + '%) · diperbarui ' + new Date().toLocaleTimeString('id-ID');
+
+    $('grafik').replaceChildren(...d.paslon.map(c => {
+      const persen = d.totalSuara ? c.suara / d.totalSuara * 100 : 0;
+      const baris = document.createElement('div');
+      baris.className = 'baris';
+      const kepala = document.createElement('div');
+      const nama = document.createElement('span');
+      nama.textContent = c.no + '. ' + c.nama;
+      const angka = document.createElement('span');
+      angka.textContent = c.suara + ' suara (' + persen.toFixed(1) + '%)';
+      kepala.append(nama, angka);
+      const jalur = document.createElement('div');
+      jalur.className = 'jalur';
+      const isi = document.createElement('div');
+      isi.className = 'isi';
+      isi.style.width = persen + '%';
+      jalur.append(isi);
+      baris.append(kepala, jalur);
+      return baris;
+    }));
+    $('masuk').hidden = true;
+    $('hasil').hidden = false;
+  } catch (err) {
+    $('pesan').textContent = 'Gagal terhubung ke server. Coba lagi.';
+  }
+}
+
+$('masuk').addEventListener('submit', e => {
+  e.preventDefault();
+  pin = $('pin').value;
+  $('pin').value = '';
+  $('pesan').textContent = '';
+  muat();
+});
+$('segarkan').addEventListener('click', muat);
+setInterval(() => { if (pin) muat(); }, 30000); // perbarui otomatis tiap 30 detik
+</script>
+</body>
+</html>
